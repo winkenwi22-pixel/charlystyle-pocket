@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#171311">
+<title>CHARLYSTYLE</title>
+<style>
+:root{--bg:#f5f1eb;--card:#fffdf9;--ink:#211c18;--muted:#756b63;--accent:#8f3f2d;--line:#ddd4cb;--soft:#eee6de}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+header{background:#171311;color:#fff;padding:14px 15px;display:flex;align-items:center;justify-content:space-between;gap:10px}header .tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}header .tools button{font-size:12px;padding:9px 10px}header .tools button.secondary{background:#eee6de;color:#211c18}
+header h1{font:24px Georgia,serif;margin:0}header small{color:#d7cec7}
+main{max-width:760px;margin:auto;padding:14px 14px 92px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:15px;margin:10px 0}
+h2,h3{font-family:Georgia,serif;margin:4px 0 10px}h2{font-size:22px}
+button,input,textarea,select{font:inherit}button{border:0;border-radius:11px;padding:11px 13px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer}
+button.secondary{background:var(--soft);color:var(--ink)}button.ghost{background:transparent;color:var(--accent);padding:7px}
+input,textarea,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink)}
+textarea{min-height:220px;line-height:1.6;resize:vertical}label{display:block;font-size:13px;color:var(--muted);font-weight:700;margin:9px 0 4px}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:120px}.muted{color:var(--muted)}
+.item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.notice{border-left:4px solid var(--accent);background:#f1e7df;border-radius:8px;padding:10px 12px;font-size:13px}
+.badge{display:inline-block;background:var(--soft);border-radius:99px;padding:5px 8px;font-size:12px;margin:2px}
+.danger{color:#9b2d22}
+nav{position:fixed;bottom:0;left:0;right:0;background:#fffdf9;border-top:1px solid var(--line);display:flex;z-index:20}
+nav button{background:transparent;color:var(--ink);border-radius:0;flex:1;padding:12px 4px;font-size:12px}nav button.active{color:var(--accent)}
+.toast{position:fixed;left:14px;right:14px;bottom:76px;background:#171311;color:white;border-radius:12px;padding:12px;z-index:50;text-align:center;display:none}
+.small{font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>CHARLYSTYLE</h1><small>Escribir más verdadero.</small></div>
+  <div class="tools"><button type="button" class="secondary" onclick="exportBackup()">Respaldo</button><button type="button" onclick="newWork()">＋ Obra</button></div>
+</header>
+<input id="backupFile" type="file" accept="application/json,.json" hidden>
+<main id="app"></main>
+<nav>
+  <button type="button" data-view="works">📚<br>Obras</button>
+  <button type="button" data-view="editor">✍️<br>Editor</button>
+  <button type="button" data-view="bible">🧠<br>Biblia</button>
+  <button type="button" data-view="continuity">🧩<br>Continuidad</button>
+</nav>
+<div id="toast" class="toast"></div>
+
+<script>
+(function(){
+"use strict";
+var KEY="CHARLYSTYLE_POCKET_V2";
+var memory=null;
+function load(){
+  try{
+    var raw=localStorage.getItem(KEY);
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return {works:[],current:null,view:"works",storageFallback:true};
+}
+var S=load();
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(S));S.storageFallback=false;return true}
+  catch(e){S.storageFallback=true;memory=S;return false}
+}
+function downloadFile(name, content, type){
+  var blob=new Blob([content],{type:type||"text/plain;charset=utf-8"});
+  var url=URL.createObjectURL(blob),a=document.createElement("a");
+  a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(function(){URL.revokeObjectURL(url)},1000);
+}
+function safeName(s){return String(s||"CHARLYSTYLE").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-zA-Z0-9_-]+/g,"_").replace(/^_+|_+$/g,"").slice(0,70)||"CHARLYSTYLE"}
+window.exportBackup=function(){
+  if(S.view==="editor"&&current())saveEditor();
+  var payload={app:"CHARLYSTYLE",formatVersion:1,exportedAt:new Date().toISOString(),data:S};
+  downloadFile("CHARLYSTYLE_respaldo_"+new Date().toISOString().slice(0,10)+".json",JSON.stringify(payload,null,2),"application/json;charset=utf-8");
+  toast("Respaldo descargado");
+};
+window.importBackup=function(file){
+  if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(){
+    try{
+      var parsed=JSON.parse(String(reader.result||""));
+      var data=parsed&&parsed.app==="CHARLYSTYLE"?parsed.data:parsed;
+      if(!data||!Array.isArray(data.works))throw new Error("Formato no reconocido");
+      if(!confirm("La importación sustituirá las obras que hay en esta app. Descarga antes un respaldo si quieres conservarlas. ¿Continuar?"))return;
+      S={works:data.works,current:data.current||null,view:"works",storageFallback:false};
+      if(S.current&&!S.works.some(function(w){return w.id===S.current}))S.current=null;
+      save();render();toast("Respaldo importado");
+    }catch(e){alert("No se pudo importar el archivo. Comprueba que sea un respaldo válido de CHARLYSTYLE.")}
+  };
+  reader.onerror=function(){alert("No se pudo leer el archivo seleccionado.")};reader.readAsText(file);
+};
+window.exportCurrentText=function(){
+  if(S.view==="editor"&&current())saveEditor();
+  var w=current();if(!w){toast("Abre una obra primero");return}
+  var content=w.title+"\n"+"=".repeat(Math.max(8,w.title.length))+"\n\n"+w.text;
+  downloadFile(safeName(w.title)+".txt",content,"text/plain;charset=utf-8");
+  toast("Texto exportado");
+};
+function toast(msg){
+  var t=document.getElementById("toast");t.textContent=msg;t.style.display="block";
+  clearTimeout(window.__toast);window.__toast=setTimeout(function(){t.style.display="none"},2200);
+}
+function esc(s){
+  return String(s==null?"":s).replace(/[&<>"']/g,function(m){return({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[m]});
+}
+function current(){for(var i=0;i<S.works.length;i++)if(S.works[i].id===S.current)return S.works[i];return null}
+window.newWork=function(){
+  var id="w_"+Date.now()+"_"+Math.floor(Math.random()*100000);
+  var w={id:id,title:"Nueva obra",genre:"Narrativa",intensity:3,pov:"",tense:"",text:"",currentPoint:"",
+    characters:[],locations:[],objects:[],events:[],futurePlan:[],secrets:[],knowledge:[]};
+  S.works.unshift(w);S.current=id;S.view="editor";save();render();
+  toast("Obra creada");
+};
+window.openWork=function(id){S.current=id;S.view="editor";save();render()};
+window.deleteWork=function(id){
+  if(!confirm("¿Eliminar esta obra?"))return;
+  S.works=S.works.filter(function(w){return w.id!==id});
+  S.current=null;S.view="works";save();render();toast("Obra eliminada");
+};
+function setView(v){
+  if(v!=="works"&&!current()){toast("Primero crea o abre una obra");return}
+  S.view=v;save();render();
+}
+function editor(w){
+  var modes=["CREAR","CONTINUAR","REVISAR","PULIR","HUMANIZAR","ANALIZAR","ADAPTAR"];
+  return '<section class="card">'+
+  '<label>Título</label><input id="title" value="'+esc(w.title)+'">'+
+  '<div class="row"><div><label>Género / modo</label><input id="genre" value="'+esc(w.genre)+'"></div>'+
+  '<div><label>Intensidad</label><select id="intensity">'+[1,2,3,4,5].map(function(n){return '<option value="'+n+'" '+(n==w.intensity?"selected":"")+'>'+n+'</option>'}).join("")+'</select></div></div>'+
+  '<label>Narrador / POV</label><input id="pov" value="'+esc(w.pov)+'">'+
+  '<label>Tiempo verbal</label><input id="tense" value="'+esc(w.tense)+'">'+
+  '<label>Punto actual de la historia</label><textarea id="point" style="min-height:100px">'+esc(w.currentPoint)+'</textarea></section>'+
+  '<section class="card"><h2>Editor</h2><textarea id="text" placeholder="Escribe aquí...">'+esc(w.text)+'</textarea>'+
+  '<div class="row" style="margin-top:10px">'+modes.map(function(m){return '<button type="button" class="secondary" onclick="runMode(\''+m+'\')">'+m+'</button>'}).join("")+'</div>'+
+  '<p id="modeMsg" class="muted small"></p><button type="button" class="secondary" onclick="exportCurrentText()">Exportar obra a TXT</button></section>'+
+  '<section class="card notice"><b>Estado:</b> la app ya guarda la obra y su Biblia. Los botones de modo funcionan como selección y preparación. <b>La generación de texto necesita conectar un motor IA</b>.';
+}
+function saveEditor(){
+  var w=current();if(!w)return;
+  w.title=document.getElementById("title").value.trim()||"Nueva obra";
+  w.genre=document.getElementById("genre").value.trim()||"Narrativa";
+  w.intensity=Number(document.getElementById("intensity").value)||3;
+  w.pov=document.getElementById("pov").value;
+  w.tense=document.getElementById("tense").value;
+  w.currentPoint=document.getElementById("point").value;
+  w.text=document.getElementById("text").value;
+  save();return w;
+}
+window.runMode=function(m){
+  saveEditor();
+  var msg=document.getElementById("modeMsg");
+  if(m==="CREAR"){
+    msg.innerHTML="<b>CREAR</b> está seleccionado.<br>Escribe tu idea en el editor. El motor IA desarrollará la historia cuando esté conectado.";
+  }else if(m==="CONTINUAR"){
+    msg.innerHTML="<b>CONTINUAR</b> está seleccionado.<br>La app conservará el punto actual y la Biblia. El motor IA generará la continuación cuando esté conectado.";
+  }else{
+    msg.innerHTML="<b>"+m+"</b> está seleccionado.<br>La operación está preparada en la interfaz; falta conectar el motor IA.";
+  }
+  toast("Modo "+m+" preparado");
+};
+function listBlock(label,key,w,placeholder){
+  return '<div class="card"><h3>'+label+'</h3>'+
+    (w[key].length?w[key].map(function(x,i){return '<div class="item"><span>'+esc(x)+'</span><button type="button" class="ghost danger" onclick="removeItem(\''+key+'\','+i+')">×</button></div>'}).join(""):'<p class="muted small">Vacío.</p>')+
+    '<div class="row" style="margin-top:8px"><input id="add_'+key+'" placeholder="'+placeholder+'"><button type="button" onclick="addItem(\''+key+'\')">Añadir</button></div></div>';
+}
+function bible(w){
+  return '<section class="card"><h2>🧠 Biblia</h2><p class="muted">Memoria exclusiva de <b>'+esc(w.title)+'</b>.</p>'+
+  listBlock("Personajes","characters",w,"Nombre / rasgos")+
+  listBlock("Lugares","locations",w,"Lugar")+
+  listBlock("Objetos","objects",w,"Objeto")+
+  listBlock("Acontecimientos confirmados","events",w,"Acontecimiento ocurrido")+
+  listBlock("Plan futuro — NO ocurrido","futurePlan",w,"Acontecimiento futuro")+
+  listBlock("Secretos","secrets",w,"Secreto")+
+  listBlock("Conocimiento de personajes","knowledge",w,"Personaje: qué sabe")+'</section>';
+}
+window.addItem=function(key){
+  var el=document.getElementById("add_"+key);var v=el?el.value.trim():"";if(!v)return;
+  current()[key].push(v);save();render();toast("Añadido");
+};
+window.removeItem=function(key,i){current()[key].splice(i,1);save();render()};
+function continuity(w){
+  return '<section class="card"><h2>🧩 Control de continuidad</h2>'+
+  '<div class="notice"><b>Regla maestra:</b> si falta información imprescindible para una decisión que pueda cambiar la historia, CHARLYSTYLE debe detenerse y preguntar. No rellenar huecos con suposiciones.</div>'+
+  '<h3>Punto actual</h3><p>'+ (w.currentPoint?esc(w.currentPoint):'<span class="muted">No establecido.</span>')+'</p>'+
+  '<h3>Confirmado</h3><p>'+(w.events.length?w.events.map(function(x){return '<span class="badge">✓ '+esc(x)+'</span>'}).join(" "):'<span class="muted">Nada registrado.</span>')+'</p>'+
+  '<h3>Futuro</h3><p>'+(w.futurePlan.length?w.futurePlan.map(function(x){return '<span class="badge">→ '+esc(x)+'</span>'}).join(" "):'<span class="muted">Nada registrado.</span>')+'</p>'+
+  '<p class="muted">Antes de CONTINUAR se comprobarán canon, tiempo, espacio, acciones físicas, conocimiento, personalidad, relaciones, objetos y causalidad.</p></section>';
+}
+function works(){
+  var list=S.works.map(function(w){return '<section class="card"><div class="item"><div style="flex:1" onclick="openWork(\''+w.id+'\')"><b>'+esc(w.title)+'</b><br><small class="muted">'+esc(w.genre)+' · intensidad '+w.intensity+'/5</small></div><button type="button" class="ghost danger" onclick="deleteWork(\''+w.id+'\')">Eliminar</button></div></section>'}).join("");
+  return '<section class="card"><h2>Mis obras</h2><p class="muted">Cada obra tiene su propia memoria. No se mezclan personajes, hechos ni secretos.</p><div class="row"><button type="button" onclick="newWork()">＋ Crear obra</button><button type="button" class="secondary" onclick="document.getElementById(\'backupFile\').click()">Importar respaldo</button></div><p class="muted small">Haz copias de seguridad con frecuencia. Los datos se guardan en este navegador, no en la nube.</p></section>'+
+  (list||'<section class="card muted">Todavía no hay obras.</section>')+
+  (S.storageFallback?'<section class="card notice"><b>Nota:</b> este archivo se está ejecutando localmente. Si el navegador bloquea el almacenamiento, la obra puede no sobrevivir al cerrar la pestaña. En la siguiente versión añadiremos exportación/importación de respaldo.</section>':'');
+}
+function render(){
+  document.querySelectorAll("nav button").forEach(function(b){b.classList.toggle("active",b.getAttribute("data-view")===S.view)});
+  var a=document.getElementById("app"),w=current();
+  if(S.view==="works")a.innerHTML=works();
+  else if(!w){S.view="works";a.innerHTML=works()}
+  else if(S.view==="editor")a.innerHTML=editor(w);
+  else if(S.view==="bible")a.innerHTML=bible(w);
+  else a.innerHTML=continuity(w);
+}
+document.getElementById("backupFile").addEventListener("change",function(e){
+  var file=e.target.files&&e.target.files[0];if(file)importBackup(file);e.target.value="";
+});
+document.querySelector("nav").addEventListener("click",function(e){
+  var b=e.target.closest("button[data-view]");if(b){
+    if(S.view==="editor" && current()) saveEditor();
+    setView(b.getAttribute("data-view"));
+  }
+});
+document.addEventListener("input",function(e){
+  if(S.view!=="editor" || !current()) return;
+  var ids=["title","genre","intensity","pov","tense","point","text"];
+  if(ids.indexOf(e.target.id)!==-1){
+    clearTimeout(window.__saveTimer);
+    window.__saveTimer=setTimeout(function(){saveEditor()},250);
+  }
+});
+render();
+})();
+</script>
+</body></html>
